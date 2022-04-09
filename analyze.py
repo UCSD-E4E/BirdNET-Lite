@@ -1,4 +1,3 @@
-
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
@@ -14,6 +13,7 @@ import librosa
 import numpy as np
 import math
 import time
+import pandas as pd
 
 def loadModel():
 
@@ -67,13 +67,13 @@ def splitSignal(sig, rate, overlap, seconds=3.0, minlen=1.5):
         # End of signal?
         if len(split) < int(minlen * rate):
             break
-
+        
         # Signal chunk too short? Fill with zeros.
         if len(split) < int(rate * seconds):
             temp = np.zeros((int(rate * seconds)))
             temp[:len(split)] = split
             split = temp
-
+        
         sig_splits.append(split)
 
     return sig_splits
@@ -85,6 +85,7 @@ def readAudioData(path, overlap, sample_rate=48000):
     # Open file with librosa (uses ffmpeg or libav)
     try:
         sig, rate = librosa.load(path, sr=sample_rate, mono=True, res_type='kaiser_fast')
+        clip_length = librosa.get_duration(y=sig, sr=rate)
     except:
         return 0
     # Split audio into 3-second chunks
@@ -92,13 +93,13 @@ def readAudioData(path, overlap, sample_rate=48000):
 
     print('DONE! READ', str(len(chunks)), 'CHUNKS.')
 
-    return chunks
+    return chunks, clip_length
 
 def convertMetadata(m):
 
     # Convert week to cosine
     if m[2] >= 1 and m[2] <= 48:
-        m[2] = math.cos(math.radians(m[2] * 7.5)) + 1
+        m[2] = math.cos(math.radians(m[2] * 7.5)) + 1 
     else:
         m[2] = -1
 
@@ -168,17 +169,23 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
 
     return detections
 
-def writeResultsToFile(filename, detections, min_conf, path):
+def writeResultsToFile(detections, min_conf, path, output_metadata):
 
     print('WRITING RESULTS TO', path, '...', end=' ')
     rcnt = 0
-    with open(path, 'w') as rfile:
-        rfile.write('FILENAME;OFFSET;End (s);Scientific name;Common name;Confidence\n')
-        for d in detections:
-            for entry in detections[d]:
-                if entry[1] >= min_conf and (entry[0] in WHITE_LIST or len(WHITE_LIST) == 0):
-                    rfile.write(filename + ';'+ d + ';' + entry[0].replace('_', ';') + ';' + str(entry[1]) + '\n')
-                    rcnt += 1
+    df = pd.DataFrame(columns = ['FOLDER', 'IN FILE', 'CLIP LENGTH', 'CHANNEL', 'OFFSET', 'DURATION', 'SAMPLING RATE','MANUAL ID'])
+    row = pd.DataFrame(output_metadata, index = [0])
+    
+    for d in detections:
+        for entry in detections[d]:
+            if entry[1] >= min_conf and (entry[0] in WHITE_LIST or len(WHITE_LIST) == 0):
+                time_interval = d.split(';')
+                row['OFFSET'] = float(time_interval[0])
+                row['DURATION'] = str(float(time_interval[1])-float(time_interval[0]))
+                row['MANUAL ID'] = entry[0].split('_')[0]
+                df = pd.concat([df,row])
+                rcnt += 1
+    df.to_csv(path, index=False)
     print('DONE! WROTE', rcnt, 'RESULTS.')
 
 
@@ -191,11 +198,25 @@ def parseTestSet(path, file_type='wav'):
     else:
         for dirpath, _, filenames in os.walk(path):
             for f in filenames:
+                print(f.rsplit('.', 1)[-1].lower())
                 if f.rsplit('.', 1)[-1].lower() == file_type:
                     dataset.append(os.path.abspath(os.path.join(dirpath, f)))
-
     return dataset
 
+def extractInputFolder(path):
+    dirpath = path
+
+    # If the path is a file, then obtain its directory name
+    if(not os.path.isdir(path)):
+        dirpath = os.path.dirname(path)
+
+    # Convert absolute path to relative path
+    if(os.path.isabs(dirpath)):
+        cwd = os.getcwd()
+        dirpath = os.path.relpath(dirpath, cwd)
+    return dirpath
+
+        
 
 def main():
 
@@ -210,15 +231,15 @@ def main():
     parser.add_argument('--week', type=int, default=-1, help='Week of the year when the recording was made. Values in [1, 48] (4 weeks per month). Set -1 to ignore.')
     parser.add_argument('--overlap', type=float, default=0.0, help='Overlap in seconds between extracted spectrograms. Values in [0.0, 2.9]. Defaults tp 0.0.')
     parser.add_argument('--sensitivity', type=float, default=1.0, help='Detection sensitivity; Higher values result in higher sensitivity. Values in [0.5, 1.5]. Defaults to 1.0.')
-    parser.add_argument('--min_conf', type=float, default=0.1, help='Minimum confidence threshold. Values in [0.01, 0.99]. Defaults to 0.1.')
+    parser.add_argument('--min_conf', type=float, default=0.1, help='Minimum confidence threshold. Values in [0.01, 0.99]. Defaults to 0.1.')   
     parser.add_argument('--custom_list', default='', help='Path to text file containing a list of species. Not used if not provided.')
     parser.add_argument('--filetype', default='wav', help='Filetype of soundscape recordings. Defaults to \'wav\'.')
-
+    parser.add_argument('--sample_rate', default=48000, help='Sampling rate used on audio. Defaults to 48000')
     args = parser.parse_args()
 
     # Load model
     interpreter = loadModel()
-
+    
     dataset = parseTestSet(args.i, args.filetype)
 
     # Load custom species list
@@ -234,34 +255,43 @@ def main():
     week = max(1, min(args.week, 48))
     sensitivity = max(0.5, min(1.0 - (args.sensitivity - 1.0), 1.5))
 
-    ## TODO refactor so that this works in a more general case, I.E. you don't have to differentiate between cases where there is only one clip vs. when there
-    ## is multiple audio clips to process. 
+    output_metadata = {}
+    output_metadata['CHANNEL'] = 0 # Setting channel to 0 by default
+    output_metadata['SAMPLING RATE'] = args.sample_rate
+    output_metadata['FOLDER']  = extractInputFolder(args.i)
+
     if len(dataset) == 1:
         try:
             datafile = dataset[0]
-            print(datafile)
-            audioData = readAudioData(datafile, args.overlap)
+            output_metadata['IN FILE'] = os.path.basename(datafile)
+            audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
+            output_metadata['CLIP LENGTH'] = clip_length
             detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
             directory, filename = datafile.rsplit(os.path.sep, 1)
             if args.o == 'result.csv':
                 if not os.path.exists(directory):
                     os.makedirs(directory)
                 output_file = '.'.join((datafile.rsplit('.', 1)[0], 'csv'))
+                
             else:
-                output_file = '{}{}{}.csv'.format(args.o.strip(os.path.sep, 1), os.path.sep, filename.rsplit('.', 1)[0])
-            writeResultsToFile(datafile, detections, min_conf, output_file)
+                output_file = '{}{}{}.csv'.format(args.o.strip(os.path.sep), os.path.sep, filename.rsplit('.', 1)[0]) 
+            writeResultsToFile(detections, min_conf, output_file, output_metadata)
         except:
-            print("Error processing file: {}".format(datafile))
+            print("Error processing file: {}".format(datafile)) 	
     elif len(dataset) > 0:
         for datafile in dataset:
+            
             try:
                 # Read audio data
-                audioData = readAudioData(datafile, args.overlap)
+                audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
                 if audioData == 0:
                     continue
                 detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
-
+            
                 directory, filename = datafile.rsplit(os.path.sep, 1)
+
+                output_metadata['IN FILE'] = os.path.basename(datafile)
+                output_metadata['CLIP LENGTH'] = clip_length
                 if args.o == 'result.csv':
                     if not os.path.exists(directory):
                         os.makedirs(directory)
@@ -269,13 +299,13 @@ def main():
                 else:
                     root_folder = args.i.strip(os.path.sep).rsplit(os.path.sep, 1)[-1]
                     output_directory = '{}{}{}{}{}'.format(args.o.rstrip(os.path.sep), os.path.sep, root_folder.strip(os.path.sep), os.path.sep, directory.split(root_folder)[-1].strip(os.path.sep))
-                    if not os.path.exists(output_directory):
+                    if not os.path.exists(output_directory): 
                         os.makedirs(output_directory)
                     output_file = '{}{}{}.{}'.format(output_directory.rstrip(os.path.sep), os.path.sep, filename.split('.')[0], 'csv')
-
-                writeResultsToFile(datafile, detections, min_conf, output_file)
+		
+                writeResultsToFile(detections, min_conf, output_file, output_metadata)
             except:
-                print("Error in processing file: {}".format(datafile))
+                print("Error in processing file: {}".format(datafile)) 
     else:
         print("No input file/folder passed")
 
