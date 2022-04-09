@@ -85,6 +85,7 @@ def readAudioData(path, overlap, sample_rate=48000):
     # Open file with librosa (uses ffmpeg or libav)
     try:
         sig, rate = librosa.load(path, sr=sample_rate, mono=True, res_type='kaiser_fast')
+        clip_len = len(sig)/sample_rate
     except:
         return 0
     # Split audio into 3-second chunks
@@ -92,7 +93,7 @@ def readAudioData(path, overlap, sample_rate=48000):
 
     print('DONE! READ', str(len(chunks)), 'CHUNKS.')
 
-    return chunks
+    return chunks, clip_len
 
 def convertMetadata(m):
 
@@ -114,7 +115,7 @@ def convertMetadata(m):
 def custom_sigmoid(x, sensitivity=1.0):
     return 1 / (1.0 + np.exp(-sensitivity * x))
 
-def predict(sample, interpreter, sensitivity):
+def predict(sample, interpreter, sensitivity, num_predictions):
 
     # Make a prediction
     interpreter.set_tensor(INPUT_LAYER_INDEX, np.array(sample[0], dtype='float32'))
@@ -132,14 +133,14 @@ def predict(sample, interpreter, sensitivity):
     p_sorted = sorted(p_labels.items(), key=operator.itemgetter(1), reverse=True)
 
     # Remove species that are on blacklist
-    for i in range(min(10, len(p_sorted))):
+    for i in range(min(num_predictions, len(p_sorted))):
         if p_sorted[i][0] in ['Human_Human', 'Non-bird_Non-bird', 'Noise_Noise']:
             p_sorted[i] = (p_sorted[i][0], 0.0)
 
     # Only return first the top ten results
-    return p_sorted[:args.num_outputs]
+    return p_sorted[:num_predictions]
 
-def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
+def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter, num_predictions):
 
     detections = {}
     start = time.time()
@@ -157,7 +158,7 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
         sig = np.expand_dims(c, 0)
 
         # Make prediction
-        p = predict([sig, mdata], interpreter, sensitivity)
+        p = predict([sig, mdata], interpreter, sensitivity, num_predictions)
 
         # Save result and timestamp
         pred_end = pred_start + 3.0
@@ -168,16 +169,16 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
 
     return detections
 
-def writeResultsToFile(filename, detections, min_conf, path):
+def writeResultsToFile(filename, detections, min_conf, path, clip_len):
 
     print('WRITING RESULTS TO', path, '...', end=' ')
     rcnt = 0
     with open(path, 'w') as rfile:
-        rfile.write('FILENAME;OFFSET;End (s);Scientific name;Common name;Confidence\n')
+        rfile.write('FILENAME;CLIP LENGTH;OFFSET;End (s);Scientific name;Common name;Confidence\n')
         for d in detections:
             for entry in detections[d]:
                 if entry[1] >= min_conf and (entry[0] in WHITE_LIST or len(WHITE_LIST) == 0):
-                    rfile.write(filename + ';'+ d + ';' + entry[0].replace('_', ';') + ';' + str(entry[1]) + '\n')
+                    rfile.write(filename + ';' + str(clip_len) +';'+ d + ';' + entry[0].replace('_', ';') + ';' + str(entry[1]) + '\n')
                     rcnt += 1
     print('DONE! WROTE', rcnt, 'RESULTS.')
 
@@ -213,8 +214,7 @@ def main():
     parser.add_argument('--min_conf', type=float, default=0.1, help='Minimum confidence threshold. Values in [0.01, 0.99]. Defaults to 0.1.')
     parser.add_argument('--custom_list', default='', help='Path to text file containing a list of species. Not used if not provided.')
     parser.add_argument('--filetype', default='wav', help='Filetype of soundscape recordings. Defaults to \'wav\'.')
-    parser.add_argument('--num_outputs',type=int, default=10, help="The number of species predictions in a given 3s segment. Defaults to 10")
-
+    parser.add_argument('--num_predictions', type=int, default=10, help='Defines maximum number of written predictions in a given 3s segment. Defaults to 10')
     args = parser.parse_args()
 
     # Load model
@@ -241,8 +241,8 @@ def main():
         try:
             datafile = dataset[0]
             print(datafile)
-            audioData = readAudioData(datafile, args.overlap)
-            detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
+            audioData, clip_len = readAudioData(datafile, args.overlap)
+            detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter, args.num_predictions)
             directory, filename = datafile.rsplit(os.path.sep, 1)
             if args.o == 'result.csv':
                 if not os.path.exists(directory):
@@ -250,17 +250,17 @@ def main():
                 output_file = '.'.join((datafile.rsplit('.', 1)[0], 'csv'))
             else:
                 output_file = '{}{}{}.csv'.format(args.o.strip(os.path.sep, 1), os.path.sep, filename.rsplit('.', 1)[0])
-            writeResultsToFile(datafile, detections, min_conf, output_file)
+            writeResultsToFile(datafile, detections, min_conf, output_file, clip_len)
         except:
             print("Error processing file: {}".format(datafile))
     elif len(dataset) > 0:
         for datafile in dataset:
             try:
                 # Read audio data
-                audioData = readAudioData(datafile, args.overlap)
+                audioData, clip_len = readAudioData(datafile, args.overlap)
                 if audioData == 0:
                     continue
-                detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
+                detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter, args.num_predictions)
 
                 directory, filename = datafile.rsplit(os.path.sep, 1)
                 if args.o == 'result.csv':
@@ -274,7 +274,7 @@ def main():
                         os.makedirs(output_directory)
                     output_file = '{}{}{}.{}'.format(output_directory.rstrip(os.path.sep), os.path.sep, filename.split('.')[0], 'csv')
 
-                writeResultsToFile(datafile, detections, min_conf, output_file)
+                writeResultsToFile(datafile, detections, min_conf, output_file,clip_len)
             except:
                 print("Error in processing file: {}".format(datafile))
     else:
