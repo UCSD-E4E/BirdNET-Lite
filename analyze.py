@@ -169,11 +169,10 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
 
     return detections
 
-def writeResultsToFile(detections, min_conf, path, output_metadata):
+def writeResultsToDf(df, detections, min_conf, path, output_metadata):
 
     print('WRITING RESULTS TO', path, '...', end=' ')
     rcnt = 0
-    df = pd.DataFrame(columns = ['FOLDER', 'IN FILE', 'CLIP LENGTH', 'CHANNEL', 'OFFSET', 'DURATION', 'SAMPLING RATE','MANUAL ID'])
     row = pd.DataFrame(output_metadata, index = [0])
     
     for d in detections:
@@ -185,8 +184,8 @@ def writeResultsToFile(detections, min_conf, path, output_metadata):
                 row['MANUAL ID'] = entry[0].split('_')[0]
                 df = pd.concat([df,row])
                 rcnt += 1
-    df.to_csv(path, index=False)
     print('DONE! WROTE', rcnt, 'RESULTS.')
+    return df
 
 
 def parseTestSet(path, file_type='wav'):
@@ -255,6 +254,7 @@ def main():
     week = max(1, min(args.week, 48))
     sensitivity = max(0.5, min(1.0 - (args.sensitivity - 1.0), 1.5))
 
+    df = pd.DataFrame(columns = ['FOLDER', 'IN FILE', 'CLIP LENGTH', 'CHANNEL', 'OFFSET', 'DURATION', 'SAMPLING RATE','MANUAL ID'])
     output_metadata = {}
     output_metadata['CHANNEL'] = 0 # Setting channel to 0 by default
     output_metadata['SAMPLING RATE'] = args.sample_rate
@@ -275,9 +275,9 @@ def main():
                 
             else:
                 output_file = '{}{}{}.csv'.format(args.o.strip(os.path.sep), os.path.sep, filename.rsplit('.', 1)[0]) 
-            writeResultsToFile(detections, min_conf, output_file, output_metadata)
+            df = writeResultsToDf(df, detections, min_conf, output_file, output_metadata)
         except:
-            print("Error processing file: {}".format(datafile)) 	
+             print("Error processing file: {}".format(datafile)) 	
     elif len(dataset) > 0:
         for datafile in dataset:
             
@@ -303,11 +303,12 @@ def main():
                         os.makedirs(output_directory)
                     output_file = '{}{}{}.{}'.format(output_directory.rstrip(os.path.sep), os.path.sep, filename.split('.')[0], 'csv')
 		
-                writeResultsToFile(detections, min_conf, output_file, output_metadata)
+                df = writeResultsToDf(df, detections, min_conf, output_file, output_metadata)
             except:
                 print("Error in processing file: {}".format(datafile)) 
     else:
         print("No input file/folder passed")
+    df.to_csv('results.csv', index=False)
 
 if __name__ == '__main__':
 
