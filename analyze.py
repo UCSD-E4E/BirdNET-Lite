@@ -174,7 +174,7 @@ def writeResultsToFile(filename, detections, min_conf, path, clip_len):
     print('WRITING RESULTS TO', path, '...', end=' ')
     rcnt = 0
     with open(path, 'w') as rfile:
-        rfile.write('FILENAME;CLIP LENGTH;OFFSET;End (s);Scientific name;Common name;Confidence\n')
+        rfile.write('FILENAME;CLIP LENGTH;Start (s);End (s);Scientific name;Common name;Confidence\n')
         for d in detections:
             for entry in detections[d]:
                 if entry[1] >= min_conf and (entry[0] in WHITE_LIST or len(WHITE_LIST) == 0):
