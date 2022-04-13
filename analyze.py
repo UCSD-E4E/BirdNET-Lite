@@ -169,9 +169,8 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
 
     return detections
 
-def writeResultsToDf(df, detections, min_conf, path, output_metadata):
+def writeResultsToDf(df, detections, min_conf, output_metadata):
 
-    print('WRITING RESULTS TO', path, '...', end=' ')
     rcnt = 0
     row = pd.DataFrame(output_metadata, index = [0])
     
@@ -215,7 +214,12 @@ def extractInputFolder(path):
         dirpath = os.path.relpath(dirpath, cwd)
     return dirpath
 
-        
+def getAbsPath(path):
+    if(os.path.isabs(path)):
+        return path
+    else:
+        path = os.path.join(os.getcwd(), path)
+    return path       
 
 def main():
 
@@ -224,7 +228,7 @@ def main():
     # Parse passed arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--i', help='Path to input folder/input file. All the nested folders will also be processed.')
-    parser.add_argument('--o', default='result.csv', help='Path to output folder. By default results are written into the input folder.')
+    parser.add_argument('--o', default='result.csv', help='Absolute path to output folder. By default results are written into the input folder.')
     parser.add_argument('--lat', type=float, default=-1, help='Recording location latitude. Set -1 to ignore.')
     parser.add_argument('--lon', type=float, default=-1, help='Recording location longitude. Set -1 to ignore.')
     parser.add_argument('--week', type=int, default=-1, help='Week of the year when the recording was made. Values in [1, 48] (4 weeks per month). Set -1 to ignore.')
@@ -296,19 +300,21 @@ def main():
                     if not os.path.exists(directory):
                         os.makedirs(directory)
                     output_file = '.'.join((datafile.rsplit('.', 1)[0], 'csv'))
+                    print(output_file)
                 else:
-                    root_folder = args.i.strip(os.path.sep).rsplit(os.path.sep, 1)[-1]
-                    output_directory = '{}{}{}{}{}'.format(args.o.rstrip(os.path.sep), os.path.sep, root_folder.strip(os.path.sep), os.path.sep, directory.split(root_folder)[-1].strip(os.path.sep))
+                    output_directory = getAbsPath(args.o) 
+                    print(output_directory)
                     if not os.path.exists(output_directory): 
                         os.makedirs(output_directory)
-                    output_file = '{}{}{}.{}'.format(output_directory.rstrip(os.path.sep), os.path.sep, filename.split('.')[0], 'csv')
-		
-                df = writeResultsToDf(df, detections, min_conf, output_file, output_metadata)
+                    output_file = os.path.join(getAbsPath(args.o), 'results.csv')
+
+                df = writeResultsToDf(df, detections, min_conf, output_metadata)
             except:
                 print("Error in processing file: {}".format(datafile)) 
     else:
         print("No input file/folder passed")
-    df.to_csv('results.csv', index=False)
+    print('WRITING RESULTS TO', output_file, '...', end=' ')
+    df.to_csv(output_file, index=False)
 
 if __name__ == '__main__':
 
