@@ -115,7 +115,7 @@ def convertMetadata(m):
 def custom_sigmoid(x, sensitivity=1.0):
     return 1 / (1.0 + np.exp(-sensitivity * x))
 
-def predict(sample, interpreter, sensitivity):
+def predict(sample, interpreter, sensitivity, num_predictions):
 
     # Make a prediction
     interpreter.set_tensor(INPUT_LAYER_INDEX, np.array(sample[0], dtype='float32'))
@@ -133,14 +133,14 @@ def predict(sample, interpreter, sensitivity):
     p_sorted = sorted(p_labels.items(), key=operator.itemgetter(1), reverse=True)
 
     # Remove species that are on blacklist
-    for i in range(min(10, len(p_sorted))):
+    for i in range(min(num_predictions, len(p_sorted))):
         if p_sorted[i][0] in ['Human_Human', 'Non-bird_Non-bird', 'Noise_Noise']:
             p_sorted[i] = (p_sorted[i][0], 0.0)
 
     # Only return first the top ten results
-    return p_sorted[:10]
+    return p_sorted[:num_predictions]
 
-def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
+def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter, num_predictions):
 
     detections = {}
     start = time.time()
@@ -158,7 +158,7 @@ def analyzeAudioData(chunks, lat, lon, week, sensitivity, overlap, interpreter):
         sig = np.expand_dims(c, 0)
 
         # Make prediction
-        p = predict([sig, mdata], interpreter, sensitivity)
+        p = predict([sig, mdata], interpreter, sensitivity, num_predictions)
 
         # Save result and timestamp
         pred_end = pred_start + 3.0
@@ -238,6 +238,7 @@ def main():
     parser.add_argument('--custom_list', default='', help='Path to text file containing a list of species. Not used if not provided.')
     parser.add_argument('--filetype', default='wav', help='Filetype of soundscape recordings. Defaults to \'wav\'.')
     parser.add_argument('--sample_rate', default=48000, help='Sampling rate used on audio. Defaults to 48000')
+    parser.add_argument('--num_predictions', type=int, default=10, help='Defines maximum number of written predictions in a given 3s segment. Defaults to 10')
     args = parser.parse_args()
 
     # Load model
@@ -270,7 +271,7 @@ def main():
             output_metadata['IN FILE'] = os.path.basename(datafile)
             audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
             output_metadata['CLIP LENGTH'] = clip_length
-            detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
+            detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter, args.num_predictions)
             directory, filename = datafile.rsplit(os.path.sep, 1)
             if args.o == 'result.csv':
                 if not os.path.exists(directory):
@@ -290,7 +291,7 @@ def main():
                 audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
                 if audioData == 0:
                     continue
-                detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter)
+                detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter,  args.num_predictions)
             
                 directory, filename = datafile.rsplit(os.path.sep, 1)
 
