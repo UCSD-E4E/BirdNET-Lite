@@ -86,6 +86,7 @@ def readAudioData(path, overlap, sample_rate=48000):
     try:
         sig, rate = librosa.load(path, sr=sample_rate, mono=True, res_type='kaiser_fast')
         clip_length = librosa.get_duration(y=sig, sr=rate)
+
     except:
         return 0
     # Split audio into 3-second chunks
@@ -94,6 +95,7 @@ def readAudioData(path, overlap, sample_rate=48000):
     print('DONE! READ', str(len(chunks)), 'CHUNKS.')
 
     return chunks, clip_length
+
 
 def convertMetadata(m):
 
@@ -183,6 +185,7 @@ def writeResultsToDf(df, detections, min_conf, output_metadata):
                 row['MANUAL ID'] = entry[0].split('_')[0]
                 df = pd.concat([df,row])
                 rcnt += 1
+
     print('DONE! WROTE', rcnt, 'RESULTS.')
     return df
 
@@ -242,6 +245,7 @@ def main():
     output_metadata['SAMPLING RATE'] = sample_rate
     output_file = os.path.join(args.i, 'result.csv')
 
+
     if len(dataset) == 1:
         try:
             datafile = dataset[0]
@@ -259,6 +263,7 @@ def main():
                     os.makedirs(output_directory)
                 output_file = os.path.join(output_directory, 'result.csv')
             df = writeResultsToDf(df, detections, min_conf, output_metadata)
+
         except:
              print("Error processing file: {}".format(datafile))
     elif len(dataset) > 0:
@@ -273,6 +278,7 @@ def main():
                 output_metadata['IN FILE'] = os.path.split(datafile)[1]
                 output_metadata['CLIP LENGTH'] = clip_length
                 df = writeResultsToDf(df, detections, min_conf, output_metadata)
+
             except:
                 print("Error in processing file: {}".format(datafile)) 
         if args.o == 'result.csv':
