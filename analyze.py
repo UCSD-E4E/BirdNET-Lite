@@ -196,31 +196,10 @@ def parseTestSet(path, file_type='wav'):
     else:
         for dirpath, _, filenames in os.walk(path):
             for f in filenames:
-                print(f.rsplit('.', 1)[-1].lower())
                 if f.rsplit('.', 1)[-1].lower() == file_type:
                     dataset.append(os.path.abspath(os.path.join(dirpath, f)))
     return dataset
-
-def extractInputFolder(path):
-    dirpath = path
-
-    # If the path is a file, then obtain its directory name
-    if(not os.path.isdir(path)):
-        dirpath = os.path.dirname(path)
-
-    # Convert absolute path to relative path
-    if(os.path.isabs(dirpath)):
-        cwd = os.getcwd()
-        dirpath = os.path.relpath(dirpath, cwd)
-    return dirpath
-
-def getAbsPath(path):
-    if(os.path.isabs(path)):
-        return path
-    else:
-        path = os.path.join(os.getcwd(), path)
-    return path       
-
+       
 def main():
 
     global WHITE_LIST
@@ -237,15 +216,13 @@ def main():
     parser.add_argument('--min_conf', type=float, default=0.1, help='Minimum confidence threshold. Values in [0.01, 0.99]. Defaults to 0.1.')   
     parser.add_argument('--custom_list', default='', help='Path to text file containing a list of species. Not used if not provided.')
     parser.add_argument('--filetype', default='wav', help='Filetype of soundscape recordings. Defaults to \'wav\'.')
-    parser.add_argument('--sample_rate', default=48000, help='Sampling rate used on audio. Defaults to 48000')
     parser.add_argument('--num_predictions', type=int, default=10, help='Defines maximum number of written predictions in a given 3s segment. Defaults to 10')
     args = parser.parse_args()
-
+    
     # Load model
     interpreter = loadModel()
     
     dataset = parseTestSet(args.i, args.filetype)
-
     # Load custom species list
     if not args.custom_list == '':
         WHITE_LIST = loadCustomSpeciesList(args.custom_list)
@@ -258,62 +235,57 @@ def main():
     # Process audio data and get detections
     week = max(1, min(args.week, 48))
     sensitivity = max(0.5, min(1.0 - (args.sensitivity - 1.0), 1.5))
-
+    sample_rate = 48000
     df = pd.DataFrame(columns = ['FOLDER', 'IN FILE', 'CLIP LENGTH', 'CHANNEL', 'OFFSET', 'DURATION', 'SAMPLING RATE','MANUAL ID'])
     output_metadata = {}
     output_metadata['CHANNEL'] = 0 # Setting channel to 0 by default
-    output_metadata['SAMPLING RATE'] = args.sample_rate
-    output_metadata['FOLDER']  = extractInputFolder(args.i)
+    output_metadata['SAMPLING RATE'] = sample_rate
+    output_file = os.path.join(args.i, 'result.csv')
 
     if len(dataset) == 1:
         try:
             datafile = dataset[0]
-            output_metadata['IN FILE'] = os.path.basename(datafile)
-            audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
+            output_metadata['FOLDER']  = os.path.relpath(os.path.split(datafile)[0], os.getcwd())
+            output_metadata['IN FILE'] =  os.path.split(datafile)[1]
+            audioData, clip_length = readAudioData(datafile, args.overlap, sample_rate)
             output_metadata['CLIP LENGTH'] = clip_length
             detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter, args.num_predictions)
-            directory, filename = datafile.rsplit(os.path.sep, 1)
             if args.o == 'result.csv':
-                if not os.path.exists(directory):
-                    os.makedirs(directory)
-                output_file = '.'.join((datafile.rsplit('.', 1)[0], 'csv'))
-                
+                output_file = os.path.join(output_metadata['FOLDER'], 'result.csv')
+                output_file = os.path.abspath(output_file)
             else:
-                output_file = '{}{}{}.csv'.format(args.o.strip(os.path.sep), os.path.sep, filename.rsplit('.', 1)[0]) 
-            df = writeResultsToDf(df, detections, min_conf, output_file, output_metadata)
+                output_directory = os.path.abspath(args.o) 
+                if not os.path.exists(output_directory): 
+                    os.makedirs(output_directory)
+                output_file = os.path.join(output_directory, 'result.csv')
+            df = writeResultsToDf(df, detections, min_conf, output_metadata)
         except:
-             print("Error processing file: {}".format(datafile)) 	
+             print("Error processing file: {}".format(datafile))
     elif len(dataset) > 0:
-        for datafile in dataset:
-            
+        for datafile in dataset:         
             try:
                 # Read audio data
-                audioData, clip_length = readAudioData(datafile, args.overlap, args.sample_rate)
+                audioData, clip_length = readAudioData(datafile, args.overlap, sample_rate)
                 if audioData == 0:
                     continue
                 detections = analyzeAudioData(audioData, args.lat, args.lon, week, sensitivity, args.overlap, interpreter,  args.num_predictions)
-            
-                directory, filename = datafile.rsplit(os.path.sep, 1)
-
-                output_metadata['IN FILE'] = os.path.basename(datafile)
+                output_metadata['FOLDER']  = os.path.relpath(os.path.split(datafile)[0], os.getcwd())
+                output_metadata['IN FILE'] = os.path.split(datafile)[1]
                 output_metadata['CLIP LENGTH'] = clip_length
-                if args.o == 'result.csv':
-                    if not os.path.exists(directory):
-                        os.makedirs(directory)
-                    output_file = '.'.join((datafile.rsplit('.', 1)[0], 'csv'))
-                    print(output_file)
-                else:
-                    output_directory = getAbsPath(args.o) 
-                    print(output_directory)
-                    if not os.path.exists(output_directory): 
-                        os.makedirs(output_directory)
-                    output_file = os.path.join(getAbsPath(args.o), 'results.csv')
-
                 df = writeResultsToDf(df, detections, min_conf, output_metadata)
             except:
                 print("Error in processing file: {}".format(datafile)) 
+        if args.o == 'result.csv':
+            output_file = os.path.join(args.i, 'result.csv')
+            output_file = os.path.abspath(output_file)
+        else:
+            output_directory = os.path.abspath(args.o) 
+            if not os.path.exists(output_directory): 
+                os.makedirs(output_directory)
+            output_file = os.path.join(output_directory, 'result.csv')
     else:
         print("No input file/folder passed")
+        exit()
     print('WRITING RESULTS TO', output_file, '...', end=' ')
     df.to_csv(output_file, index=False)
 
