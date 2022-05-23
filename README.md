@@ -1,7 +1,5 @@
 [![CC BY-NC-SA 4.0][cc-by-nc-sa-shield]][cc-by-nc-sa]
 
-# This repository is deprecated
-
 Please take a look at our latest BirdNET repository with updated models, tools and interfaces: [BirdNET-Analyzer](https://github.com/kahst/BirdNET-Analyzer) 
 
 # BirdNET-Lite
