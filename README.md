@@ -63,6 +63,7 @@ The input parameters include:
 --min_conf, Minimum confidence threshold. Values in [0.01, 0.99]. Defaults to 0.1.
 --custom_list, Path to text file containing a list of species. Not used if not provided.
 --filetype, Filetype of soundscape recordings. Defaults to 'wav'.
+--num_predictions, Defines maximum number of written predictions in a given 3s segment. Defaults to 10
 ```
 
 Note: A custom species list needs to contain one species label per line. Take a look at the `model/label.txt` for the correct species label. Only labels from this text file are valid. You can find an example of a valid custom list in the 'example' folder.
